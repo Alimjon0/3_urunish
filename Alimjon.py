@@ -1,201 +1,233 @@
-import sys
-import pymysql
+import json
+from pathlib import Path
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QLineEdit, QLabel, QComboBox, QTableWidget,
-    QPushButton, QTableWidgetItem, QMessageBox
+    QApplication, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout,
+    QTableWidget, QTableWidgetItem, QPushButton, QLineEdit, QHeaderView
 )
 
-PAGE_SIZE = 5
+# ====== Yordamchi funksiyalar ======
+def load_data(filename):
+    path = Path(filename)
+    return json.load(open(path, "r")) if path.exists() else []
+
+def save_data(filename, data):
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
 
-class Mahsulotlar(QWidget):
-    def __init__(self, connection, cursor):
+# ====== Kontaktlar ======
+class ContactsTab(QWidget):
+    FILE = "contacts.json"
+
+    def __init__(self):
         super().__init__()
-        self.connection = connection
-        self.cursor = cursor
-        self.CURRENT_PAGE = 0
+        self.layout = QVBoxLayout(self)
+        self.table = QTableWidget(0, 3)
+        self.table.setHorizontalHeaderLabels(["Ism", "Familiya", "Telefon"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.layout.addWidget(self.table)
 
-        self.setWindowTitle("Mahsulotlar bazasi (CRUD + Qidirish)")
-        self.resize(750, 500)
+        form = QHBoxLayout()
+        self.name = QLineEdit(); self.name.setPlaceholderText("Ism")
+        self.surname = QLineEdit(); self.surname.setPlaceholderText("Familiya")
+        self.phone = QLineEdit(); self.phone.setPlaceholderText("Telefon")
+        form.addWidget(self.name); form.addWidget(self.surname); form.addWidget(self.phone)
+        self.layout.addLayout(form)
 
-        # 🔍 Qidirish va filter
-        self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Mahsulot nomi...")
+        btns = QHBoxLayout()
+        self.add_btn = QPushButton("➕ Qo‘shish")
+        self.edit_btn = QPushButton("✏️ Tahrirlash")
+        self.del_btn = QPushButton("🗑 O‘chirish")
+        btns.addWidget(self.add_btn); btns.addWidget(self.edit_btn); btns.addWidget(self.del_btn)
+        self.layout.addLayout(btns)
 
-        self.category_box = QComboBox()
-        self.load_category()
+        self.add_btn.clicked.connect(self.add_contact)
+        self.edit_btn.clicked.connect(self.edit_contact)
+        self.del_btn.clicked.connect(self.del_contact)
+        self.load_table()
 
-        self.btn_search = QPushButton("Qidirish")
-        self.btn_refresh = QPushButton("Yangilash")
-        self.btn_add = QPushButton("Qo‘shish")
-        self.btn_edit = QPushButton("Tahrirlash")
-        self.btn_delete = QPushButton("O‘chirish")
-
-        # Jadval
-        self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["ID", "Nomi", "Narxi", "Kategoriya"])
-        self.table.setColumnWidth(0, 50)
-        self.table.setColumnWidth(1, 220)
-        self.table.setColumnWidth(2, 100)
-        self.table.setColumnWidth(3, 200)
-
-        # Layout
-        top = QHBoxLayout()
-        top.addWidget(QLabel("Kategoriya:"))
-        top.addWidget(self.category_box)
-        top.addWidget(self.search_box)
-        top.addWidget(self.btn_search)
-        top.addWidget(self.btn_refresh)
-
-        bottom = QHBoxLayout()
-        bottom.addWidget(self.btn_add)
-        bottom.addWidget(self.btn_edit)
-        bottom.addWidget(self.btn_delete)
-
-        layout = QVBoxLayout()
-        layout.addLayout(top)
-        layout.addWidget(self.table)
-        layout.addLayout(bottom)
-        self.setLayout(layout)
-
-        # Button eventlar
-        self.btn_refresh.clicked.connect(self.load_data)
-        self.btn_search.clicked.connect(self.search)
-        self.btn_add.clicked.connect(self.add_item)
-        self.btn_edit.clicked.connect(self.edit_item)
-        self.btn_delete.clicked.connect(self.remove_item)
-
-        self.load_data()
-
-    # --------- Bazadan kategoriyalarni olish
-    def load_category(self):
-        try:
-            self.cursor.execute("SELECT name FROM categories ORDER BY id")
-            rows = self.cursor.fetchall()
-            self.categories_box.clear()
-            self.categories_box.addItem("Barchasi")
-            for row in rows:
-                self.categories_box.addItem(row[0])
-        except Exception as e:
-            QMessageBox.critical(self, "Xato", f"Kategoriyalarni yuklashda xato:\n{e}")
-
-    # --------- Mahsulotlarni yuklash
-    def load_data(self):
-        sql = """
-            SELECT p.id, p.name, p.price, c.name
-            FROM products p
-            LEFT JOIN categories c ON p.category_id=c.id
-            ORDER BY p.id DESC
-        """
-        self.cursor.execute(sql)
-        data = self.cursor.fetchall()
+    def load_table(self):
+        data = load_data(self.FILE)
         self.table.setRowCount(0)
-        for r, row in enumerate(data):
-            self.table.insertRow(r)
-            for c, value in enumerate(row):
-                self.table.setItem(r, c, QTableWidgetItem(str(value) if value is not None else ""))
+        for row, c in enumerate(data):
+            self.table.insertRow(row)
+            self.table.setItem(row,0,QTableWidgetItem(c["name"]))
+            self.table.setItem(row,1,QTableWidgetItem(c["surname"]))
+            self.table.setItem(row,2,QTableWidgetItem(c["phone"]))
 
-    # --------- Qidirish
-    def search(self):
-        name = self.search_box.text().strip()
-        cat = self.category_box.currentText()
+    def add_contact(self):
+        if self.name.text() and self.surname.text() and self.phone.text():
+            data = load_data(self.FILE)
+            data.append({"name": self.name.text(),
+                         "surname": self.surname.text(),
+                         "phone": self.phone.text()})
+            save_data(self.FILE, data)
+            self.name.clear(); self.surname.clear(); self.phone.clear()
+            self.load_table()
 
-        sql = """
-            SELECT p.id, p.name, p.price, c.name
-            FROM products p
-            LEFT JOIN categories c ON p.category_id=c.id
-            WHERE 1=1
-        """
-        params = []
+    def edit_contact(self):
+        row = self.table.currentRow()
+        if row >= 0:
+            data = load_data(self.FILE)
+            data[row]["name"] = self.name.text() or data[row]["name"]
+            data[row]["surname"] = self.surname.text() or data[row]["surname"]
+            data[row]["phone"] = self.phone.text() or data[row]["phone"]
+            save_data(self.FILE, data)
+            self.load_table()
 
-        if name:
-            sql += " AND p.name LIKE %s"
-            params.append(f"%{name}%")
-        if cat and cat != "Barchasi":
-            sql += " AND c.name=%s"
-            params.append(cat)
+    def del_contact(self):
+        row = self.table.currentRow()
+        if row >= 0:
+            data = load_data(self.FILE)
+            data.pop(row)
+            save_data(self.FILE, data)
+            self.load_table()
 
-        sql += " ORDER BY p.id DESC"
 
-        self.cursor.execute(sql, tuple(params))
-        data = self.cursor.fetchall()
+# ====== ToDo List ======
+class TodoTab(QWidget):
+    FILE = "todo.json"
 
+    def __init__(self):
+        super().__init__()
+        self.layout = QVBoxLayout(self)
+        self.table = QTableWidget(0,3)
+        self.table.setHorizontalHeaderLabels(["Vazifa", "Tugash", "Holat"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.layout.addWidget(self.table)
+
+        form = QHBoxLayout()
+        self.title = QLineEdit(); self.title.setPlaceholderText("Vazifa nomi")
+        self.due = QLineEdit(); self.due.setPlaceholderText("YYYY-MM-DD")
+        form.addWidget(self.title); form.addWidget(self.due)
+        self.layout.addLayout(form)
+
+        btns = QHBoxLayout()
+        self.add_btn = QPushButton("➕ Qo‘shish")
+        self.done_btn = QPushButton("✅ Bajarildi")
+        self.del_btn = QPushButton("🗑 O‘chirish")
+        btns.addWidget(self.add_btn); btns.addWidget(self.done_btn); btns.addWidget(self.del_btn)
+        self.layout.addLayout(btns)
+
+        self.add_btn.clicked.connect(self.add_task)
+        self.done_btn.clicked.connect(self.toggle_done)
+        self.del_btn.clicked.connect(self.del_task)
+        self.load_table()
+
+    def load_table(self):
+        data = load_data(self.FILE)
         self.table.setRowCount(0)
-        for r, row in enumerate(data):
+        for r,t in enumerate(data):
             self.table.insertRow(r)
-            for c, value in enumerate(row):
-                self.table.setItem(r, c, QTableWidgetItem(str(value) if value else ""))
+            self.table.setItem(r,0,QTableWidgetItem(t["title"]))
+            self.table.setItem(r,1,QTableWidgetItem(t["due"]))
+            self.table.setItem(r,2,QTableWidgetItem("✅" if t["done"] else "❌"))
 
-    # --------- Qo‘shish
-    def add_item(self):
-        name = self.search_box.text().strip()
-        cat = self.category_box.currentText()
-        if not name:
-            QMessageBox.warning(self, "Ogohlantirish", "Mahsulot nomini kiriting!")
-            return
+    def add_task(self):
+        if self.title.text():
+            data = load_data(self.FILE)
+            data.append({"title": self.title.text(), "due": self.due.text(), "done": False})
+            save_data(self.FILE, data)
+            self.title.clear(); self.due.clear()
+            self.load_table()
 
-        cat_id = None
-        if cat and cat != "Barchasi":
-            self.cursor.execute("SELECT id FROM categories WHERE name=%s", (cat,))
-            r = self.cursor.fetchone()
-            cat_id = r[0] if r else None
-
-        self.cursor.execute(
-            "INSERT INTO products(name, price, category_id) VALUES(%s, %s, %s)",
-            (name, 0, cat_id)
-        )
-        self.connection.commit()
-        self.load_data()
-        self.search_box.clear()
-
-    # --------- Tahrirlash
-    def edit_item(self):
+    def toggle_done(self):
         row = self.table.currentRow()
-        if row < 0:
-            QMessageBox.warning(self, "Ogohlantirish", "Tahrirlash uchun yozuvni tanlang!")
-            return
+        if row >= 0:
+            data = load_data(self.FILE)
+            data[row]["done"] = not data[row]["done"]
+            save_data(self.FILE, data)
+            self.load_table()
 
-        id_ = int(self.table.item(row, 0).text())
-        new_name = self.search_box.text().strip()
-        if not new_name:
-            QMessageBox.warning(self, "Ogohlantirish", "Yangi nomni kiriting!")
-            return
-
-        self.cursor.execute("UPDATE products SET name=%s WHERE id=%s", (new_name, id_))
-        self.connection.commit()
-        self.load_data()
-        self.search_box.clear()
-
-    # --------- O‘chirish
-    def remove_item(self):
+    def del_task(self):
         row = self.table.currentRow()
-        if row < 0:
-            QMessageBox.warning(self, "Ogohlantirish", "O‘chirish uchun yozuvni tanlang!")
-            return
-
-        id_ = int(self.table.item(row, 0).text())
-        self.cursor.execute("DELETE FROM products WHERE id=%s", (id_,))
-        self.connection.commit()
-        self.load_data()
+        if row >= 0:
+            data = load_data(self.FILE)
+            data.pop(row)
+            save_data(self.FILE, data)
+            self.load_table()
 
 
-if __name__ == "__main__":
-    try:
-        connection = pymysql.connect(
-            host="localhost",
-            user="root",
-            password="admin",
-            database="organization_db"
-        )
-        cursor = connection.cursor()
-        print("✅ Baza ulandi")
-    except Exception as e:
-        print("❌ Baza bilan ulanishda xato:", e)
-        sys.exit()
+# ====== Kitoblar ======
+class BooksTab(QWidget):
+    FILE = "books.json"
 
-    app = QApplication(sys.argv)
-    oyna = Mahsulotlar(connection, cursor)
-    oyna.show()
-    sys.exit(app.exec_())
+    def __init__(self):
+        super().__init__()
+        self.layout = QVBoxLayout(self)
+        self.table = QTableWidget(0,3)
+        self.table.setHorizontalHeaderLabels(["Nom", "Muallif", "Yil"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.layout.addWidget(self.table)
+
+        form = QHBoxLayout()
+        self.title = QLineEdit(); self.title.setPlaceholderText("Kitob nomi")
+        self.author = QLineEdit(); self.author.setPlaceholderText("Muallif")
+        self.year = QLineEdit(); self.year.setPlaceholderText("Yil")
+        form.addWidget(self.title); form.addWidget(self.author); form.addWidget(self.year)
+        self.layout.addLayout(form)
+
+        btns = QHBoxLayout()
+        self.add_btn = QPushButton("➕ Qo‘shish")
+        self.edit_btn = QPushButton("✏️ Tahrirlash")
+        self.del_btn = QPushButton("🗑 O‘chirish")
+        btns.addWidget(self.add_btn); btns.addWidget(self.edit_btn); btns.addWidget(self.del_btn)
+        self.layout.addLayout(btns)
+
+        self.add_btn.clicked.connect(self.add_book)
+        self.edit_btn.clicked.connect(self.edit_book)
+        self.del_btn.clicked.connect(self.del_book)
+        self.load_table()
+
+    def load_table(self):
+        data = load_data(self.FILE)
+        self.table.setRowCount(0)
+        for r,b in enumerate(data):
+            self.table.insertRow(r)
+            self.table.setItem(r,0,QTableWidgetItem(b["title"]))
+            self.table.setItem(r,1,QTableWidgetItem(b["author"]))
+            self.table.setItem(r,2,QTableWidgetItem(b["year"]))
+
+    def add_book(self):
+        if self.title.text():
+            data = load_data(self.FILE)
+            data.append({"title": self.title.text(), "author": self.author.text(), "year": self.year.text()})
+            save_data(self.FILE, data)
+            self.title.clear(); self.author.clear(); self.year.clear()
+            self.load_table()
+
+    def edit_book(self):
+        row = self.table.currentRow()
+        if row >= 0:
+            data = load_data(self.FILE)
+            if self.title.text(): data[row]["title"] = self.title.text()
+            if self.author.text(): data[row]["author"] = self.author.text()
+            if self.year.text(): data[row]["year"] = self.year.text()
+            save_data(self.FILE, data)
+            self.load_table()
+
+    def del_book(self):
+        row = self.table.currentRow()
+        if row >= 0:
+            data = load_data(self.FILE)
+            data.pop(row)
+            save_data(self.FILE, data)
+            self.load_table()
+
+
+# ====== Asosiy oynani yaratish ======
+class MainApp(QTabWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("🟢 Oson loyihalar")
+        self.resize(700, 400)
+        self.addTab(ContactsTab(), "Kontaktlar")
+        self.addTab(TodoTab(), "ToDo List")
+        self.addTab(BooksTab(), "Kitoblar")
+
+
+
+app = QApplication([])
+win = MainApp()
+win.show()
+app.exec_()
